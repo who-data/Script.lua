@@ -570,10 +570,14 @@ function RiverLib:_update_tabs(active_tab)
                     ImageTransparency = 0.1, ImageColor3 = ThemeColors.PrimaryLight
                 }):Play()
             end
-            -- mover pin
-            local offset = obj.LayoutOrder * (0.113 / 1.3)
+            -- mover pin — usar posição absoluta da tab para ficar centralizado
+            local tabAbsY = obj.AbsolutePosition.Y
+            local containerAbsY = self._container.AbsolutePosition.Y
+            local containerH    = self._container.AbsoluteSize.Y
+            local pinH          = self._pin.AbsoluteSize.Y
+            local relY = (tabAbsY - containerAbsY + obj.AbsoluteSize.Y / 2 - pinH / 2) / containerH
             TweenService:Create(self._pin, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-                Position = UDim2.fromScale(0.026, 0.135 + offset)
+                Position = UDim2.fromScale(0.026, relY)
             }):Play()
         else
             TweenService:Create(obj, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
@@ -607,10 +611,130 @@ end
 function RiverLib:apply_theme(name)
     local t = Themes[name]
     if not t then return end
+
+    -- 1. Atualiza a tabela global de cores
     for k, v in pairs(t) do
         ThemeColors[k] = v
     end
-    -- notifica
+
+    -- 2. Reaplicar nas instâncias já criadas dentro do ScreenGui
+    local gui = self._gui
+    if not gui then return end
+
+    -- Helper: percorre toda a hierarquia e reaplicar cores pelo Name/ClassName
+    local function repaint(root)
+        for _, obj in root:GetDescendants() do
+            local name2 = obj.Name
+            local cls   = obj.ClassName
+
+            -- UIStroke: bordas dos módulos, container, dropdowns
+            if cls == "UIStroke" then
+                obj.Color = ThemeColors.Primary
+
+            -- UIGradient no ClientName (título da janela)
+            elseif cls == "UIGradient" and obj.Parent and obj.Parent.Name == "ClientName" then
+                obj.Color = ColorSequence.new{
+                    ColorSequenceKeypoint.new(0, ThemeColors.PrimaryLight),
+                    ColorSequenceKeypoint.new(1, ThemeColors.Accent)
+                }
+
+            -- Pin lateral
+            elseif name2 == "Pin" then
+                obj.BackgroundColor3 = ThemeColors.Accent
+
+            -- Container principal
+            elseif name2 == "Container" and cls == "Frame" then
+                obj.BackgroundColor3 = ThemeColors.Background
+
+            -- Módulos
+            elseif name2 == "Module" and cls == "Frame" then
+                obj.BackgroundColor3 = ThemeColors.SecondaryBg
+
+            -- Botão do dropdown principal
+            elseif name2 == "DDBtn" then
+                obj.BackgroundColor3 = ThemeColors.SecondaryBg
+
+            -- Painel flutuante de opções do dropdown
+            elseif name2 == "OptionsPanel" then
+                obj.BackgroundColor3 = ThemeColors.SecondaryBg
+
+            -- Toggle (track)
+            elseif name2 == "Toggle" and cls == "Frame" then
+                -- mantém cor atual mas atualiza a cor desligado
+                -- (quando ligado já usa Accent pelo tween, apenas reset do desligado)
+                -- Não forçamos aqui para não estragar estado atual
+
+            -- Círculo do toggle
+            elseif name2 == "Circle" and cls == "Frame" then
+                local toggle = obj.Parent
+                -- se o toggle está "ligado" (circle na direita) usa Accent
+                if toggle and toggle.Name == "Toggle" then
+                    local circlePosX = obj.Position.X.Scale
+                    if circlePosX > 0.3 then
+                        obj.BackgroundColor3 = ThemeColors.Accent
+                    end
+                end
+
+            -- Fill do slider
+            elseif name2 == "Fill" and cls == "Frame" and obj.Parent and obj.Parent.Name == "Drag" then
+                obj.BackgroundColor3 = ThemeColors.Accent
+                local g = obj:FindFirstChildOfClass("UIGradient")
+                if g then
+                    g.Color = ColorSequence.new{
+                        ColorSequenceKeypoint.new(0, ThemeColors.PrimaryLight),
+                        ColorSequenceKeypoint.new(1, ThemeColors.Accent)
+                    }
+                end
+
+            -- Fill do checkbox
+            elseif name2 == "Fill" and cls == "Frame" and obj.Parent and obj.Parent.Name == "Box" then
+                obj.BackgroundColor3 = ThemeColors.Accent
+
+            -- Track do slider
+            elseif name2 == "Drag" and cls == "Frame" then
+                obj.BackgroundColor3 = ThemeColors.TertiaryBg
+
+            -- Keybind frame
+            elseif name2 == "Keybind" and cls == "Frame" then
+                obj.BackgroundColor3 = ThemeColors.Primary
+
+            -- Labels de valor do slider
+            elseif name2 == "Value" and cls == "TextLabel" then
+                obj.TextColor3 = ThemeColors.PrimaryLight
+
+            -- Labels de texto primário genéricos
+            elseif cls == "TextLabel" then
+                if name2 == "ModuleName" then
+                    obj.TextColor3 = ThemeColors.PrimaryLight
+                elseif name2 == "ClientName" then
+                    obj.TextColor3 = ThemeColors.PrimaryLight
+                elseif name2 == "SliderTitle" or name2 == "TitleLabel" then
+                    obj.TextColor3 = ThemeColors.TextPrimary
+                elseif name2 == "Description" then
+                    obj.TextColor3 = ThemeColors.TextSecondary
+                elseif name2 == "Selected" then
+                    obj.TextColor3 = ThemeColors.PrimaryLight
+                elseif name2 == "KeybindLabel" then
+                    obj.TextColor3 = ThemeColors.TextPrimary
+                end
+
+            -- Ícones (ImageLabel)
+            elseif cls == "ImageLabel" then
+                if name2 == "HeaderIcon" or name2 == "Icon" then
+                    obj.ImageColor3 = ThemeColors.PrimaryLight
+                end
+
+            -- TextBox
+            elseif cls == "TextBox" then
+                obj.TextColor3 = ThemeColors.TextPrimary
+                obj.PlaceholderColor3 = ThemeColors.TextDisabled
+                obj.BackgroundColor3 = ThemeColors.SecondaryBg
+            end
+        end
+    end
+
+    repaint(gui)
+
     RiverLib.notify({ title = "Theme", text = name .. " applied!", duration = 2 })
 end
 
@@ -1360,10 +1484,11 @@ function RiverLib:create_tab(title, icon)
             Arrow.Parent = Btn
 
             -- Painel flutuante de opções (scroll)
+            -- Parented ao Handler para escapar de todos os ClipsDescendants
             local OptionsPanel = Instance.new("ScrollingFrame")
             OptionsPanel.Name = "OptionsPanel"
             OptionsPanel.Size = UDim2.new(0, 207, 0, 0)
-            OptionsPanel.Position = UDim2.new(0, 0, 0, 36)
+            OptionsPanel.Position = UDim2.new(0, 0, 0, 0) -- reposicionado via AbsolutePosition no open
             OptionsPanel.BackgroundColor3 = ThemeColors.SecondaryBg
             OptionsPanel.BackgroundTransparency = 0.05
             OptionsPanel.BorderSizePixel = 0
@@ -1371,13 +1496,19 @@ function RiverLib:create_tab(title, icon)
             OptionsPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
             OptionsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
             OptionsPanel.Visible = false
-            OptionsPanel.ZIndex = 10
-            OptionsPanel.Parent = DDFrame
+            OptionsPanel.ZIndex = 50
+            OptionsPanel.Parent = lib_ref._handler
 
             do
                 local c = Instance.new("UICorner")
                 c.CornerRadius = UDim.new(0, 4)
                 c.Parent = OptionsPanel
+
+                local st = Instance.new("UIStroke")
+                st.Color = ThemeColors.Primary
+                st.Transparency = 0.4
+                st.Thickness = 1
+                st.Parent = OptionsPanel
 
                 local ul = Instance.new("UIListLayout")
                 ul.SortOrder = Enum.SortOrder.LayoutOrder
@@ -1436,17 +1567,19 @@ function RiverLib:create_tab(title, icon)
             DDFrame.MouseButton1Click:Connect(function()
                 DropManager._open = not DropManager._open
                 if DropManager._open then
+                    -- Calcular posição absoluta do Btn relativa ao Handler
+                    local handlerAbsPos = lib_ref._handler.AbsolutePosition
+                    local btnAbsPos     = Btn.AbsolutePosition
+                    local btnAbsSize    = Btn.AbsoluteSize
+                    local panelX = btnAbsPos.X - handlerAbsPos.X
+                    local panelY = btnAbsPos.Y - handlerAbsPos.Y + btnAbsSize.Y + 2
+                    OptionsPanel.Position = UDim2.fromOffset(panelX, panelY)
                     OptionsPanel.Visible = true
                     -- calcula altura: máx 120
                     local h = math.min(#(s.options or {}) * 22 + 8, 120)
                     TweenService:Create(OptionsPanel, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
                         Size = UDim2.new(0, 207, 0, h)
                     }):Play()
-                    -- expandir o módulo para caber
-                    add_size(h)
-                    if ModuleManager._state then
-                        Module.Size = UDim2.fromOffset(241, 85 + ModuleManager._size)
-                    end
                 else
                     TweenService:Create(OptionsPanel, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
                         Size = UDim2.new(0, 207, 0, 0)
